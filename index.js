@@ -1,17 +1,25 @@
-const express = require('express');
-const cors = require('cors');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-require('dotenv').config()
+const express = require("express");
+const cors = require("cors");
+const jwt = require('jsonwebtoken'); ///
+const cookieParser = require('cookie-parser'); ///
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+require("dotenv").config();
 const app = express();
 const port = process.env.PORT || 5000;
 
+
+
 // middle ware 
-app.use(cors());
+app.use(cors ({
+    origin: ['http://localhost:5173'],
+    credentials: true,
+  })
+  ); 
 app.use(express.json());
+app.use(cookieParser())
 
 
-
-// main oparation 
+// main oparation
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.3worizk.mongodb.net/?retryWrites=true&w=majority`;
 
@@ -21,83 +29,125 @@ const client = new MongoClient(uri, {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
-  }
+  },
 });
+
+//  my middleware 
+const logger = async (req,res,next) => {
+  console.log('my middle called : ', req.host , req.originalUrl);
+  next();
+}
+
+const verifyToken = async(req,res,next)=> {
+  const token = req.cookies?.token;
+  if(!token){
+    return res.status(401).send({message : 'you have no accesss token'});
+  }
+  jwt.verify(token,process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if(err){
+      console.log(err);
+      return res.status(401),send({message : 'unathorized token'});
+    }
+    console.log('value of token : ', decoded);
+    req.user = decoded;
+    next();
+  })
+}
+
 
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
+    const servicesCollection = client.db("carDoctor").collection("services");
+    const bookmarkCollection = client.db("carDoctor").collection("bookmark");
 
-    const servicesCollection = client.db('carDoctor').collection('services')
-    const bookmarkCollection = client.db('carDoctor').collection('bookmark')
 
-    app.get('/services/:id', async (req,res) => {
-         const id = req.params.id;
-         const query = {_id: new ObjectId(id)}
-         const options = {
-          projection: {title:1,price:1,service_id:1,description:1,img:1}
-         }
-         const result = await servicesCollection.findOne(query,options)
-        res.send(result)
-    })
 
-    app.get('/services', async (req,res) => {
-        const finds = servicesCollection.find();
-        const result = await finds.toArray();
-        res.send(result)
+    // jwt token oparation 
+    app.post('/jwt' , logger,  async (req,res) => {
+        const user = req.body;
+        // console.log(user)
+        const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {expiresIn : '1h'});
+        res.cookie('token', token, {
+                httpOnly: true, secure: false ,  // sameSite: 'none' //its use will cokkie will not come in fron end so comment it 
+         })
+         .send({success: true})
     })
 
 
 
-    // bookmark services 
+    // services oparation 
+    app.get("/services/:id", logger, async (req, res) => {
+      const id = req.params.id;
+      const query   = { _id: new ObjectId(id) };
+      const options = {  projection: {
+                              title: 1, price: 1, 
+                              service_id: 1, description: 1,  img: 1,  
+                            }};
+      const result = await servicesCollection.findOne(query, options);
+      res.send(result);
+    });
 
-    app.get('/bookmark', async (req,res) => {
-      // console.log(req.query.userEmail)
-      let query = {} ;
-      if(req.query?.userEmail){ 
-        query = {userEmail : req.query.userEmail}
+
+    app.get("/services", async (req, res) => {
+      const finds = servicesCollection.find();
+      const result = await finds.toArray();
+      res.send(result);
+    });
+
+
+
+
+
+    ///   bookmark services   ///
+
+    app.get("/bookmark", logger, verifyToken, async (req, res) => {
+      // console.log('i got my token he he  : ' , req.cookies?.token)
+      console.log('the verify token : ' , req.user)
+      let query = {};
+      if (req.query?.userEmail) {
+        query = { userEmail: req.query.userEmail };
       }
-
       const result = await bookmarkCollection.find(query).toArray();
-      res.send(result)
-  })
+      res.send(result);
+    });
 
-    app.post('/bookmark', async (req,res)=> {
+    app.post("/bookmark", async (req, res) => {
       const booking = req.body;
-      const result = await bookmarkCollection.insertOne(booking)
-      res.send(result)
-    })
+      const result = await bookmarkCollection.insertOne(booking);
+      res.send(result);
+    });
 
-
-
-    app.patch('/bookmark/:id', async (req,res)=> {
+    app.patch("/bookmark/:id", async (req, res) => {
       const id = req.params.id;
-      const query = {_id: new ObjectId(id)}
+      const query = { _id: new ObjectId(id) };
       const updateBooked = req.body;
-      console.log(updateBooked)
+      console.log(updateBooked);
       const updateDoc = {
-        $set : { status : updateBooked.status  }
-      }
-      
-      const result = await bookmarkCollection.updateOne(query,updateDoc)
-      res.send(result)
- 
-    })
+        $set: { status: updateBooked.status },
+      };
 
-    app.delete('/bookmark/:id', async (req,res)=> {
+      const result = await bookmarkCollection.updateOne(query, updateDoc);
+      res.send(result);
+    });
+
+    app.delete("/bookmark/:id", async (req, res) => {
       const id = req.params.id;
-      const query = {_id: new ObjectId(id)}
-      const result = await bookmarkCollection.deleteOne(query)
-      res.send(result)
-    })
+      const query = { _id: new ObjectId(id) };
+      const result = await bookmarkCollection.deleteOne(query);
+      res.send(result);
+    });
+
+
+
 
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!"
+    );
   } finally {
-    // Ensures that the client will close when you finish/error
     // await client.close();
   }
 }
@@ -106,15 +156,10 @@ run().catch(console.dir);
 
 
 
-
-
-
-
-
-// first get or set // oparation 
-app.get('/',(req,res)=> {
-    res.send('car-backend-servere-is-running')
-})
-app.listen(port,()=>{
-    console.log('port is running or working')
-})
+// first get or set // oparation
+app.get("/", (req, res) => {
+  res.send("car-backend-servere-is-running");
+});
+app.listen(port, () => {
+  console.log("port is running or working");
+});
