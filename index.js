@@ -32,23 +32,26 @@ const client = new MongoClient(uri, {
   },
 });
 
+
+
 //  my middleware 
 const logger = async (req,res,next) => {
   console.log('my middle called : ', req.host , req.originalUrl);
   next();
 }
 
+
 const verifyToken = async(req,res,next)=> {
-  const token = req.cookies?.token;
+  const token = req?.cookies?.token;
   if(!token){
-    return res.status(401).send({message : 'you have no accesss token'});
+    return res.status(401).send({message : 'unauthorized accesss'});
   }
   jwt.verify(token,process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
     if(err){
       console.log(err);
-      return res.status(401),send({message : 'unathorized token'});
+      return res.status(401).send({message : 'unathorized token'});
     }
-    console.log('value of token : ', decoded);
+    console.log('the value of token : ', decoded);
     req.user = decoded;
     next();
   })
@@ -62,16 +65,20 @@ async function run() {
     const bookmarkCollection = client.db("carDoctor").collection("bookmark");
 
 
-
     // jwt token oparation 
     app.post('/jwt' , logger,  async (req,res) => {
         const user = req.body;
-        // console.log(user)
+        console.log('jwts :',user)
         const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {expiresIn : '1h'});
         res.cookie('token', token, {
                 httpOnly: true, secure: false ,  // sameSite: 'none' //its use will cokkie will not come in fron end so comment it 
          })
-         .send({success: true})
+         .send({success: true});
+    })
+    app.post('/logout' ,   async (req,res) => {
+        const user = req.body;
+        console.log(user)
+        res.clearCookie('token', {maxAge: 0}).send({success: true})    
     })
 
 
@@ -103,14 +110,17 @@ async function run() {
 
     app.get("/bookmark", logger, verifyToken, async (req, res) => {
       // console.log('i got my token he he  : ' , req.cookies?.token)
-      console.log('the verify token : ' , req.user)
+      // console.log('req user : ' , req?.user,  '  req.query : ' , req?.query)
+      // if(req.user?.email !== req.query?.email){
+      //   return res.status(403).send({message : 'forbidden'})
+      // }
+
       let query = {};
-      if (req.query?.userEmail) {
-        query = { userEmail: req.query.userEmail };
-      }
+      if (req.query?.email) { query = { email: req.query.email}; }
       const result = await bookmarkCollection.find(query).toArray();
       res.send(result);
     });
+
 
     app.post("/bookmark", async (req, res) => {
       const booking = req.body;
